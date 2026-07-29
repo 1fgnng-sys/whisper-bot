@@ -6,15 +6,17 @@ import threading
 from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler
 
-# سيرفر وهمي لمنع Render من إيقاف البوت
+# سيرفر وهمي متوافق تماماً مع Render لمنع وضع النوم (Sleep Mode)
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(b"Advanced Smart Whisper Bot with Security Reports is Alive!")
+        self.wfile.write(b"OK - Whisper Bot is Alive!")
 
 def run_dummy_server():
-    port = int(os.environ.get("PORT", 8080))
+    # استخدام البورت المخصص من Render تلقائياً
+    port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
@@ -45,7 +47,7 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    # الذاكرة النشطة
+    # الذاكرة النشطة: اقتراح آخر العمليات
     if not query or not any(word.startswith('@') for word in query.split()):
         history = user_history.get(sender_id, [])
         if not history:
@@ -169,7 +171,7 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-            # إرسال إشعار قراءة للمرسل (فقط إذا كان القارئ ليس هو المرسل)
+            # إرسال إشعار قراءة للمرسل
             if not is_sender and current_id not in whisper['opened_by']:
                 whisper['opened_by'].append(current_id)
                 try:
@@ -190,7 +192,7 @@ async def handle_click(update, context):
                 del whispers_db[whisper_id]
 
         else:
-            # 🚨 حالة المتسلل: شخص حاول فتح همسة ليست له!
+            # حالة المتسلل
             await query.answer("🚫 هذه الهمسة ليست موجهة لك!", show_alert=True)
 
             if current_id not in whisper['intruders']:
