@@ -4,7 +4,7 @@ import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler
 
 # سيرفر وهمي لمنع Render من إيقاف البوت
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -24,17 +24,19 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 whispers_db = {}
-user_passwords = {}  # مؤقت لحفظ كلمات السر أثناء إدخال المستخدم لها
+user_passwords = {}
 
 async def start_command(update, context):
     welcome_text = (
         "أهلاً بك في **بوت الهمسات السرية المتطور**! 🤫✨\n\n"
         "--- 💡 **طرق الاستخدام العصرية** ---\n\n"
-        "1️⃣ **همسة عادية أو مجهولة:**\n"
+        "1️⃣ **همسة عادية:**\n"
         "`@vv_cbot @username نص الهمسة`\n\n"
-        "2️⃣ **همسة بكلمة سر (للكل):**\n"
+        "2️⃣ **همسة مجهولة (بدون اسمك):**\n"
+        "`@vv_cbot anon: @username نص الهمسة`\n\n"
+        "3️⃣ **همسة بكلمة سر (للكل):**\n"
         "`@vv_cbot pass:1234 نص الهمسة`\n\n"
-        "3️⃣ **همسة ذاتية التدمير (تقرأ مرة واحدة):**\n"
+        "4️⃣ **همسة ذاتية التدمير (تقرأ مرة واحدة):**\n"
         "`@vv_cbot burn: @username نص الهمسة`\n"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
@@ -54,7 +56,7 @@ async def inline_whisper(update, context):
     is_pass = False
     pass_code = ""
 
-    # تحليل الأوامر الخاصة
+    # تحليل الأوامر والبادئات بدقة
     if query.startswith("burn:"):
         is_burn = True
         query = query.replace("burn:", "").strip()
@@ -91,14 +93,14 @@ async def inline_whisper(update, context):
         'read': False
     }
 
-    # تحديد نص زر الهمسة بحسب الميزة
+    # تخصيص عنوان الزر حسب نوع الهمسة
     btn_text = "🔒 اضغط لقراءة الهمسة"
     if is_burn:
         btn_text = "💣 همسة متفجرة (مرة واحدة)"
     elif is_pass:
         btn_text = "🔑 همسة بكلمة سر"
     elif is_anon:
-        btn_text = "🤫 همسة من مجهول"
+        btn_text = "🤫 همسة سرية من مجهول"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(btn_text, callback_data=f"show_{whisper_id}")]
@@ -107,6 +109,8 @@ async def inline_whisper(update, context):
     title_text = f"إرسال همسة إلى {target_user}"
     if is_pass:
         title_text = f"🔑 همسة محمية برمز: {pass_code}"
+    elif is_anon:
+        title_text = f"🤫 همسة مجهولة إلى {target_user}"
 
     results = [
         InlineQueryResultArticle(
@@ -139,39 +143,37 @@ async def handle_click(update, context):
         current_username = user.username.lower() if user.username else ""
         current_id = user.id
 
-        # التعامل مع الهمسة بكلمة سر
         if whisper['is_pass']:
             user_passwords[current_id] = whisper_id
-            await query.answer("🔑 هذه الهمسة محمية! أرسل الرقم السري في الخاص للبوت لفتحها.", show_alert=True)
+            await query.answer("🔑 هذه الهمسة محمية برمز سري!", show_alert=True)
             return
 
         target_name = whisper['target']
         sender_id = whisper['sender_id']
         sender_username = whisper['sender_username']
 
-        # التحقق من صلاحية القراءة
         can_read = (current_username == target_name or 
                     current_id == sender_id or 
                     (sender_username and current_username == sender_username))
 
         if can_read:
-            sender_info = "مجهول 🤫" if whisper['is_anon'] else whisper['sender_name']
+            # تمييز المرسل: إذا كانت مجهولة يظهر "مجهول"، وإذا كانت عادية يظهر اسمه
+            sender_info = "شخص مجهول 🤫" if whisper['is_anon'] else whisper['sender_name']
             msg = f"📩 من: {sender_info}\n\n💬 الهمسة: {whisper['text']}"
             
             await query.answer(msg, show_alert=True)
 
-            # إشعار للمرسل بقراءة الهمسة
+            # إشعار للمرسل بقراءة الهمسة (فقط إذا لم تكن مجهولة أو لتنبيهه سراً)
             if current_id != sender_id and not whisper['read']:
                 whisper['read'] = True
                 try:
                     await context.bot.send_message(
                         chat_id=sender_id,
-                        text=f"👁️ **تمت قراءة همستك!**\nقام {user.first_name} (@{current_username}) بفتح الهمسة الآن."
+                        text=f"👁️ **تمت قراءة همستك!**\nقام {user.first_name} بفتح الهمسة الآن."
                     )
                 except Exception:
                     pass
 
-            # تدمير الهمسة إذا كانت ذاتية التدمير
             if whisper['is_burn'] and current_id != sender_id:
                 del whispers_db[whisper_id]
 
