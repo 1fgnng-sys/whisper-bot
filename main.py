@@ -11,7 +11,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Advanced Smart Whisper Bot is Alive!")
+        self.wfile.write(b"Advanced Smart Whisper Bot with Security Reports is Alive!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -24,16 +24,17 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 whispers_db = {}
-user_history = {}  # الذاكرة النشطة لحفظ آخر المنشنات لكل مستخدم
+user_history = {}
 
 async def start_command(update, context):
     welcome_text = (
-        "أهلاً بك في **بوت الهمسات الذكي**! 🤫✨\n\n"
-        "--- 💡 **الترتيب الجديد وطريقة الاستخدام** ---\n\n"
+        "أهلاً بك في **بوت الهمسات الذكي والأمني**! 🤫✨\n\n"
+        "--- 💡 **الترتيب وطريقة الاستخدام** ---\n\n"
         "1️⃣ **الترتيب:** اكتب يوزر البوت 👈 الرسالة 👈 المنشنات:\n"
-        "`@vv_cbot هلا والله كيفك @user1 @user2`\n\n"
-        "2️⃣ **المنشنات المتعددة:** يمكنك منشن شخص، شخصين، أو أكثر في نفس الهمسة!\n\n"
-        "3️⃣ **الذاكرة النشطة:** اكتب `@vv_cbot ` فقط وسيقترح عليك البوت آخر منشنات همست لها سابقاً!"
+        "`@vv_cbot هلا والله كيفكم @user1 @user2`\n\n"
+        "2️⃣ **نظام الإشعارات والأمان:**\n"
+        "• تصلك إشعارات فورية بكل شخص يفتح الهمسة من المحددين.\n"
+        "• يصلك إشعار أمني بأي 'متسلل' يحاول فتح همستك وهويته! 🚨"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
@@ -44,7 +45,7 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    # 🧠 ميزة الذاكرة النشطة: إذا لم يكتب المستعلم منشنات بعد
+    # الذاكرة النشطة
     if not query or not any(word.startswith('@') for word in query.split()):
         history = user_history.get(sender_id, [])
         if not history:
@@ -66,7 +67,6 @@ async def inline_whisper(update, context):
         await update.inline_query.answer(results, cache_time=1)
         return
 
-    # 🎯 الترتيب الجديد: استخراج المنشنات والنص
     words = query.split()
     targets = [w.replace('@', '').lower() for w in words if w.startswith('@')]
     text_words = [w for w in words if not w.startswith('@')]
@@ -75,13 +75,11 @@ async def inline_whisper(update, context):
     if not targets or not whisper_text:
         return
 
-    # حفظ في الذاكرة النشطة للمستخدم
     if sender_id not in user_history:
         user_history[sender_id] = []
     
-    # تجنب التكرار المباشر للحفظ
     user_history[sender_id].insert(0, {'targets': targets, 'text': whisper_text})
-    user_history[sender_id] = user_history[sender_id][:5]  # حفظ آخر 5 عمليات
+    user_history[sender_id] = user_history[sender_id][:5]
 
     targets_display = " ".join([f"@{t}" for t in targets])
     id_normal = str(uuid.uuid4())[:8]
@@ -94,7 +92,9 @@ async def inline_whisper(update, context):
         'sender_name': sender_name, 
         'sender_username': sender_username, 
         'text': whisper_text, 
-        'opened': False
+        'opened': False,
+        'opened_by': [],
+        'intruders': []
     }
 
     whispers_db[id_normal] = {**base_data, 'type': 'normal'}
@@ -151,7 +151,6 @@ async def handle_click(update, context):
         sender_username = whisper['sender_username']
         targets = whisper['targets']
 
-        # التحقق هل المستلم من ضمن القائمة المحددة أو هو المرسل نفسه
         is_target = current_username in targets
         is_sender = (current_id == sender_id or (sender_username and current_username == sender_username))
 
@@ -161,7 +160,7 @@ async def handle_click(update, context):
             
             await query.answer(msg, show_alert=True)
 
-            # 🔓 التغيير التلقائي للإيموجي بعد فتح القراءة أول مرة
+            # تغير أيقونة القفل بعد الفتح
             if not whisper['opened']:
                 whisper['opened'] = True
                 new_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔓 تم فتح القراءة", callback_data=f"show_{whisper_id}")]])
@@ -170,22 +169,46 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-                # إشعار قراءة للمرسل
-                if not is_sender:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=sender_id,
-                            text=f"👁️ **تمت قراءة همستك!**\nقام {user.first_name} (@{current_username}) بفتح الهمسة."
-                        )
-                    except Exception:
-                        pass
+            # إرسال إشعار قراءة للمرسل (فقط إذا كان القارئ ليس هو المرسل)
+            if not is_sender and current_id not in whisper['opened_by']:
+                whisper['opened_by'].append(current_id)
+                try:
+                    user_tag = f"@{current_username}" if current_username else user.first_name
+                    await context.bot.send_message(
+                        chat_id=sender_id,
+                        text=(
+                            f"👁️ **إشعار قراءة همسة!**\n\n"
+                            f"👤 قام {user.first_name} ({user_tag}) بفتح وقراءة همستك الموجهة لـ:\n"
+                            f"📌 {' '.join(['@'+t for t in targets])}"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
 
-            # تدمير الهمسة المتفجرة
             if whisper['type'] == 'burn' and not is_sender:
                 del whispers_db[whisper_id]
 
         else:
+            # 🚨 حالة المتسلل: شخص حاول فتح همسة ليست له!
             await query.answer("🚫 هذه الهمسة ليست موجهة لك!", show_alert=True)
+
+            if current_id not in whisper['intruders']:
+                whisper['intruders'].append(current_id)
+                try:
+                    user_tag = f"@{current_username}" if current_username else "بدون يوزر"
+                    await context.bot.send_message(
+                        chat_id=sender_id,
+                        text=(
+                            f"🚨 **تنبيه أمني: محاولة فضول/تجسس!**\n\n"
+                            f"👤 حاول {user.first_name} ({user_tag}) فتح همستك السرية الموجهة لـ:\n"
+                            f"📌 {' '.join(['@'+t for t in targets])}\n"
+                            f"🔒 وتم منعه بنجاح!"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
 
 def main():
     app = Application.builder().token(TOKEN).build()
