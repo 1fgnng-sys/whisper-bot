@@ -23,7 +23,7 @@ threading.Thread(target=run_dummy_server, daemon=True).start()
 # إعدادات تسجيل الأخطاء
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouM1I"
+TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 whispers_db = {}
 
 async def start_command(update, context):
