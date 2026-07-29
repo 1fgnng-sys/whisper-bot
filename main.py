@@ -11,7 +11,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Ultimate Whisper Bot is Alive!")
+        self.wfile.write(b"Whisper Bot with Quick Reply is Alive!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -28,14 +28,11 @@ whispers_db = {}
 async def start_command(update, context):
     welcome_text = (
         "أهلاً بك في **بوت الهمسات السرية المتكامل**! 🤫✨\n\n"
-        "--- 💡 **طريقة الاستخدام** ---\n\n"
+        "--- 💡 **طريقة الاستخدام السريعة** ---\n\n"
         "فقط اكتب في أي محادثة أو جروب:\n"
         "`@vv_cbot @username الرسالة`\n\n"
-        "وستظهر لك قائمة الخيارات بنقرة واحدة:\n"
-        "• 🔒 همسة عادية\n"
-        "• 🤫 همسة مجهولة\n"
-        "• 💣 همسة متفجرة (تختفي بعد القراءة)\n"
-        "• 🌐 همسة عامة للجميع\n"
+        "اختر نوع الهمسة من القائمة المقترحة، وعندما يقبلها المستلم ويقرأها، "
+        "يمكنه الرد عليك فوراً بزر **الرد السري المباشر**! 🎯"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
@@ -61,37 +58,43 @@ async def inline_whisper(update, context):
 
     clean_target = target_user.replace('@', '')
 
-    # توليد معرّفات فريدة لكل خيار من القائمة
     id_normal = str(uuid.uuid4())[:8]
     id_anon = str(uuid.uuid4())[:8]
     id_burn = str(uuid.uuid4())[:8]
     id_public = str(uuid.uuid4())[:8]
 
-    # حفظ جميع الحالات في قاعدة البيانات
-    whispers_db[id_normal] = {'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name, 'sender_username': sender_username, 'text': whisper_text, 'type': 'normal', 'read': False}
-    whispers_db[id_anon] = {'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name, 'sender_username': sender_username, 'text': whisper_text, 'type': 'anon', 'read': False}
-    whispers_db[id_burn] = {'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name, 'sender_username': sender_username, 'text': whisper_text, 'type': 'burn', 'read': False}
-    whispers_db[id_public] = {'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name, 'sender_username': sender_username, 'text': whisper_text, 'type': 'public', 'read': False}
+    # حفظ بيانات الهمسة والمرسل ليتمكن المستلم من الرد السريع عليه
+    base_data = {
+        'target': clean_target, 
+        'sender_id': sender_id, 
+        'sender_name': sender_name, 
+        'sender_username': sender_username, 
+        'text': whisper_text, 
+        'read': False
+    }
 
-    # الأزرار التفاعلية
+    whispers_db[id_normal] = {**base_data, 'type': 'normal'}
+    whispers_db[id_anon] = {**base_data, 'type': 'anon'}
+    whispers_db[id_burn] = {**base_data, 'type': 'burn'}
+    whispers_db[id_public] = {**base_data, 'type': 'public'}
+
     kb_normal = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 اضغط لقراءة الهمسة", callback_data=f"show_{id_normal}")]])
     kb_anon = InlineKeyboardMarkup([[InlineKeyboardButton("🤫 همسة من مجهول", callback_data=f"show_{id_anon}")]])
     kb_burn = InlineKeyboardMarkup([[InlineKeyboardButton("💣 همسة متفجرة (مرة واحدة)", callback_data=f"show_{id_burn}")]])
     kb_public = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 همسة عامة للجميع", callback_data=f"show_{id_public}")]])
 
-    # قائمة الخيارات المقترحة للمستخدم أثناء الكتابة
     results = [
         InlineQueryResultArticle(
             id=id_normal,
             title=f"🔒 همسة عادية إلى {target_user}",
-            description="يظهر اسمك للمستلم عند فتح الهمسة",
+            description="يظهر اسمك للمستلم عند فتح الهمسة مع إمكانية الرد السريع",
             input_message_content=InputTextMessageContent(message_text=f"🔒 **همسة سرية موجهة إلى [{target_user}]**\nلا يمكن لأحد قراءتها غيره.", parse_mode="Markdown"),
             reply_markup=kb_normal
         ),
         InlineQueryResultArticle(
             id=id_anon,
             title=f"🤫 همسة مجهولة إلى {target_user}",
-            description="لن يظهر اسمك للمستلم (تصل من مجهول)",
+            description="لن يظهر اسمك للمستلم",
             input_message_content=InputTextMessageContent(message_text=f"🤫 **همسة مجهولة موجهة إلى [{target_user}]**\nلا يمكن لأحد قراءتها غيره.", parse_mode="Markdown"),
             reply_markup=kb_anon
         ),
@@ -140,8 +143,13 @@ async def handle_click(update, context):
 
         if can_read:
             sender_info = "شخص مجهول 🤫" if whisper['type'] == 'anon' else whisper['sender_name']
+            
+            # نص التنبيه مع إضافة إرشادات للرد السريع إذا كان القارئ هو المستلم
             msg = f"📩 من: {sender_info}\n\n💬 الهمسة: {whisper['text']}"
             
+            if current_id != sender_id and sender_username and whisper['type'] != 'anon':
+                msg += f"\n\n💡 للرد السريع اكتب:\n`@vv_cbot @{sender_username} النص`"
+
             await query.answer(msg, show_alert=True)
 
             # إشعار قراءة للمرسل
@@ -155,7 +163,6 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-            # تدمير الهمسة المتفجرة فوراً بعد القراءة
             if whisper['type'] == 'burn' and current_id != sender_id:
                 del whispers_db[whisper_id]
 
