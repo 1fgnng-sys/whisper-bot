@@ -11,7 +11,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Advanced Whisper Bot is Alive!")
+        self.wfile.write(b"Whisper Bot is Alive!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -24,20 +24,14 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 whispers_db = {}
-user_passwords = {}
 
 async def start_command(update, context):
     welcome_text = (
-        "أهلاً بك في **بوت الهمسات السرية المتطور**! 🤫✨\n\n"
-        "--- 💡 **طرق الاستخدام العصرية** ---\n\n"
-        "1️⃣ **همسة عادية:**\n"
-        "`@vv_cbot @username نص الهمسة`\n\n"
-        "2️⃣ **همسة مجهولة (بدون اسمك):**\n"
-        "`@vv_cbot anon: @username نص الهمسة`\n\n"
-        "3️⃣ **همسة بكلمة سر (للكل):**\n"
-        "`@vv_cbot pass:1234 نص الهمسة`\n\n"
-        "4️⃣ **همسة ذاتية التدمير (تقرأ مرة واحدة):**\n"
-        "`@vv_cbot burn: @username نص الهمسة`\n"
+        "أهلاً بك في **بوت الهمسات السرية** البسيط والمباشر! 🤫✨\n\n"
+        "--- 💡 **طريقة الاستخدام السهلة** ---\n\n"
+        "فقط اكتب في أي شات أو جروب:\n"
+        "`@vv_cbot @username الرسالة`\n\n"
+        "وستظهر لك قائمة خيارات فاخرة لتختار منها نوع الهمسة بنقرة واحدة! 🎯"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
@@ -51,77 +45,75 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    is_burn = False
-    is_anon = False
-    is_pass = False
-    pass_code = ""
-
-    # تحليل الأوامر والبادئات بدقة
-    if query.startswith("burn:"):
-        is_burn = True
-        query = query.replace("burn:", "").strip()
-    
-    if query.startswith("anon:"):
-        is_anon = True
-        query = query.replace("anon:", "").strip()
-
-    if query.startswith("pass:"):
-        is_pass = True
-        parts = query.split(' ', 1)
-        pass_code = parts[0].replace("pass:", "").strip()
-        query = parts[1] if len(parts) > 1 else ""
-
     parts = query.split(' ', 1)
-    if not is_pass and len(parts) < 2:
+    if len(parts) < 2:
         return
 
-    target_user = parts[0].strip().lower() if not is_pass else "الجميع (بكلمة سر)"
-    whisper_text = parts[1].strip() if not is_pass else query
+    target_user = parts[0].strip().lower()
+    whisper_text = parts[1].strip()
 
-    whisper_id = str(uuid.uuid4())[:8]
+    if not target_user.startswith('@'):
+        return
 
-    whispers_db[whisper_id] = {
-        'target': target_user.replace('@', ''),
-        'sender_id': sender_id,
-        'sender_name': sender_name,
-        'sender_username': sender_username,
-        'text': whisper_text,
-        'is_burn': is_burn,
-        'is_anon': is_anon,
-        'is_pass': is_pass,
-        'pass_code': pass_code,
-        'read': False
+    clean_target = target_user.replace('@', '')
+
+    # إنشاء معرفات لكل خيار من الخيارات
+    id_normal = str(uuid.uuid4())[:8]
+    id_anon = str(uuid.uuid4())[:8]
+    id_public = str(uuid.uuid4())[:8]
+
+    # حفظ الخيارات في قاعدة البيانات
+    whispers_db[id_normal] = {
+        'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name,
+        'sender_username': sender_username, 'text': whisper_text, 'type': 'normal', 'read': False
+    }
+    
+    whispers_db[id_anon] = {
+        'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name,
+        'sender_username': sender_username, 'text': whisper_text, 'type': 'anon', 'read': False
     }
 
-    # تخصيص عنوان الزر حسب نوع الهمسة
-    btn_text = "🔒 اضغط لقراءة الهمسة"
-    if is_burn:
-        btn_text = "💣 همسة متفجرة (مرة واحدة)"
-    elif is_pass:
-        btn_text = "🔑 همسة بكلمة سر"
-    elif is_anon:
-        btn_text = "🤫 همسة سرية من مجهول"
+    whispers_db[id_public] = {
+        'target': clean_target, 'sender_id': sender_id, 'sender_name': sender_name,
+        'sender_username': sender_username, 'text': whisper_text, 'type': 'public', 'read': False
+    }
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(btn_text, callback_data=f"show_{whisper_id}")]
-    ])
+    # الأزرار التي ستظهر بعد الإرسال
+    kb_normal = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 اضغط لقراءة الهمسة", callback_data=f"show_{id_normal}")]])
+    kb_anon = InlineKeyboardMarkup([[InlineKeyboardButton("🤫 همسة سرية من مجهول", callback_data=f"show_{id_anon}")]])
+    kb_public = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 همسة عامة للجميع", callback_data=f"show_{id_public}")]])
 
-    title_text = f"إرسال همسة إلى {target_user}"
-    if is_pass:
-        title_text = f"🔑 همسة محمية برمز: {pass_code}"
-    elif is_anon:
-        title_text = f"🤫 همسة مجهولة إلى {target_user}"
-
+    # الخيارات التي تظهر للمستخدم أثناء الكتابة
     results = [
         InlineQueryResultArticle(
-            id=whisper_id,
-            title=title_text,
-            description="اضغط هنا لإرسال الهمسة السرية",
+            id=id_normal,
+            title=f"🔒 همسة عادية إلى {target_user}",
+            description="يظهر اسمك للمستلم عند فتح الهمسة",
             input_message_content=InputTextMessageContent(
                 message_text=f"🔒 **همسة سرية موجهة إلى [{target_user}]**\nلا يمكن لأحد قراءتها غيره.",
                 parse_mode="Markdown"
             ),
-            reply_markup=keyboard
+            reply_markup=kb_normal
+        ),
+        InlineQueryResultArticle(
+            id=id_anon,
+            title=f"🤫 همسة مجهولة إلى {target_user}",
+            description="لن يظهر اسمك للمستلم (مجهول)",
+            input_message_content=InputTextMessageContent(
+                message_text=f"🤫 **همسة مجهولة موجهة إلى [{target_user}]**\nلا يمكن لأحد قراءتها غيره.",
+                parse_mode="Markdown"
+            ),
+            reply_markup=kb_anon
+        ),
+        InlineQueryResultArticle(
+            id=id_public,
+            title=f"🌐 همسة عامة إلى {target_user}",
+            description="يمكن لجميع أعضاء الشات قراءتها",
+            input_message_content=InputTextMessageContent(
+                message_text=f"🌐 **همسة عامة موجهة إلى [{target_user}]**",
+                parse_mode="Markdown"
+            ),
+            reply_markup=kb_public
         )
     ]
 
@@ -136,34 +128,30 @@ async def handle_click(update, context):
         whisper = whispers_db.get(whisper_id)
 
         if not whisper:
-            await query.answer("❌ عذراً، هذه الهمسة تدمرت أو غير موجودة.", show_alert=True)
+            await query.answer("❌ عذراً، هذه الهمسة قديمة أو غير موجودة.", show_alert=True)
             return
 
         user = query.from_user
         current_username = user.username.lower() if user.username else ""
         current_id = user.id
 
-        if whisper['is_pass']:
-            user_passwords[current_id] = whisper_id
-            await query.answer("🔑 هذه الهمسة محمية برمز سري!", show_alert=True)
-            return
-
         target_name = whisper['target']
         sender_id = whisper['sender_id']
         sender_username = whisper['sender_username']
 
-        can_read = (current_username == target_name or 
+        # إذا كانت عامة يسمح للكل، وإلا يقتصر على المستلم والمرسل
+        can_read = (whisper['type'] == 'public' or 
+                    current_username == target_name or 
                     current_id == sender_id or 
                     (sender_username and current_username == sender_username))
 
         if can_read:
-            # تمييز المرسل: إذا كانت مجهولة يظهر "مجهول"، وإذا كانت عادية يظهر اسمه
-            sender_info = "شخص مجهول 🤫" if whisper['is_anon'] else whisper['sender_name']
+            sender_info = "شخص مجهول 🤫" if whisper['type'] == 'anon' else whisper['sender_name']
             msg = f"📩 من: {sender_info}\n\n💬 الهمسة: {whisper['text']}"
             
             await query.answer(msg, show_alert=True)
 
-            # إشعار للمرسل بقراءة الهمسة (فقط إذا لم تكن مجهولة أو لتنبيهه سراً)
+            # إشعار القراءة للمرسل
             if current_id != sender_id and not whisper['read']:
                 whisper['read'] = True
                 try:
@@ -173,10 +161,6 @@ async def handle_click(update, context):
                     )
                 except Exception:
                     pass
-
-            if whisper['is_burn'] and current_id != sender_id:
-                del whispers_db[whisper_id]
-
         else:
             await query.answer("🚫 هذه الهمسة ليست موجهة لك!", show_alert=True)
 
