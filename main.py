@@ -6,13 +6,17 @@ import threading
 from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler
 
-# سيرفر وهمي متوافق تماماً مع Render لمنع وضع النوم (Sleep Mode)
+# سيرفر وهمي يستجيب لكافة طلبات HTTP (GET و HEAD) بكود 200 OK متوافق 100% مع UptimeRobot و Render
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-type", "text/html")
+        self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"OK - Whisper Bot is Alive!")
+        self.wfile.write("OK - Whisper Bot is Alive!".encode("utf-8"))
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_dummy_server():
     # استخدام البورت المخصص من Render تلقائياً
