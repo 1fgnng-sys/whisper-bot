@@ -6,7 +6,7 @@ import threading
 from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler
 
-# سيرفر وهمي يستجيب لكافة طلبات HTTP (GET و HEAD) بكود 200 OK متوافق 100% مع UptimeRobot و Render
+# سيرفر وهمي يستجيب لكافة طلبات HTTP (GET و HEAD) بكود 200 OK متوافق مع Render و UptimeRobot
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -19,7 +19,6 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 def run_dummy_server():
-    # استخدام البورت المخصص من Render تلقائياً
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     server.serve_forever()
@@ -51,22 +50,23 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    # الذاكرة النشطة: اقتراح آخر العمليات
+    # اقتراح اليوزرات السابقة فقط بدون حفظ النص
     if not query or not any(word.startswith('@') for word in query.split()):
         history = user_history.get(sender_id, [])
         if not history:
             return
         
         results = []
-        for index, item in enumerate(history):
-            targets_str = " ".join([f"@{t}" for t in item['targets']])
+        for index, targets_list in enumerate(history):
+            targets_str = " ".join([f"@{t}" for t in targets_list])
             results.append(
                 InlineQueryResultArticle(
                     id=f"history_{index}",
-                    title=f"🕒 إعادة همسة لـ: {targets_str}",
-                    description=f"آخر همسة: {item['text'][:30]}...",
+                    title=f"👥 همسة سريعة لـ: {targets_str}",
+                    description="اضغط لوضع اليوزرات في خانة الكتابة جاهزة",
                     input_message_content=InputTextMessageContent(
-                        message_text=f"💡 اخترت إعادة التفاعل مع: {targets_str}\nيرجى كتابة الرسالة والمنشن."
+                        message_text=f"🔒 **همسة سرية موجهة إلى [{targets_str}]**\nاكتب رسالتك هنا...",
+                        parse_mode="Markdown"
                     )
                 )
             )
@@ -81,11 +81,13 @@ async def inline_whisper(update, context):
     if not targets or not whisper_text:
         return
 
+    # حفظ اليوزرات فقط في السجل (بدون حفظ نص الهمسة)
     if sender_id not in user_history:
         user_history[sender_id] = []
     
-    user_history[sender_id].insert(0, {'targets': targets, 'text': whisper_text})
-    user_history[sender_id] = user_history[sender_id][:5]
+    if targets not in user_history[sender_id]:
+        user_history[sender_id].insert(0, targets)
+        user_history[sender_id] = user_history[sender_id][:5]
 
     targets_display = " ".join([f"@{t}" for t in targets])
     id_normal = str(uuid.uuid4())[:8]
@@ -166,8 +168,8 @@ async def handle_click(update, context):
             
             await query.answer(msg, show_alert=True)
 
-            # تغير أيقونة القفل بعد الفتح
-            if not whisper['opened']:
+            # تعديل القفل: يتغير القفل فقط إذا فتح المستلم (الشخص المعني بالمنشن) الهمسة
+            if is_target and not whisper['opened']:
                 whisper['opened'] = True
                 new_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔓 تم فتح القراءة", callback_data=f"show_{whisper_id}")]])
                 try:
@@ -175,8 +177,8 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-            # إرسال إشعار قراءة للمرسل
-            if not is_sender and current_id not in whisper['opened_by']:
+            # إرسال إشعار قراءة للمرسل (عند فتح المستلم فقط)
+            if is_target and current_id not in whisper['opened_by']:
                 whisper['opened_by'].append(current_id)
                 try:
                     user_tag = f"@{current_username}" if current_username else user.first_name
@@ -192,7 +194,7 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-            if whisper['type'] == 'burn' and not is_sender:
+            if whisper['type'] == 'burn' and is_target:
                 del whispers_db[whisper_id]
 
         else:
