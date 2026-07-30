@@ -29,7 +29,6 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 whispers_db = {}
-user_history = {}
 
 async def start_command(update, context):
     welcome_text = (
@@ -50,29 +49,6 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    # اقتراح اليوزرات السابقة فقط بدون حفظ النص
-    if not query or not any(word.startswith('@') for word in query.split()):
-        history = user_history.get(sender_id, [])
-        if not history:
-            return
-        
-        results = []
-        for index, targets_list in enumerate(history):
-            targets_str = " ".join([f"@{t}" for t in targets_list])
-            results.append(
-                InlineQueryResultArticle(
-                    id=f"history_{index}",
-                    title=f"👥 همسة سريعة لـ: {targets_str}",
-                    description="اضغط لوضع اليوزرات في خانة الكتابة جاهزة",
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"🔒 **همسة سرية موجهة إلى [{targets_str}]**\nاكتب رسالتك هنا...",
-                        parse_mode="Markdown"
-                    )
-                )
-            )
-        await update.inline_query.answer(results, cache_time=1)
-        return
-
     words = query.split()
     targets = [w.replace('@', '').lower() for w in words if w.startswith('@')]
     text_words = [w for w in words if not w.startswith('@')]
@@ -80,14 +56,6 @@ async def inline_whisper(update, context):
 
     if not targets or not whisper_text:
         return
-
-    # حفظ اليوزرات فقط في السجل (بدون حفظ نص الهمسة)
-    if sender_id not in user_history:
-        user_history[sender_id] = []
-    
-    if targets not in user_history[sender_id]:
-        user_history[sender_id].insert(0, targets)
-        user_history[sender_id] = user_history[sender_id][:5]
 
     targets_display = " ".join([f"@{t}" for t in targets])
     id_normal = str(uuid.uuid4())[:8]
@@ -168,7 +136,7 @@ async def handle_click(update, context):
             
             await query.answer(msg, show_alert=True)
 
-            # تعديل القفل: يتغير القفل فقط إذا فتح المستلم (الشخص المعني بالمنشن) الهمسة
+            # يتغير القفل فقط إذا فتح المستلم (الشخص المعني) الهمسة
             if is_target and not whisper['opened']:
                 whisper['opened'] = True
                 new_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔓 تم فتح القراءة", callback_data=f"show_{whisper_id}")]])
