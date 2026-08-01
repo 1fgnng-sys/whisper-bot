@@ -32,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = "8983390041:AAFPEbUCr4WuXwj2yznl4qWZNQJ5EZouMlI"
 
 # ---------------------------------------------------------
-# 2. قاعدة البيانات المحسّنة (SQLite)
+# 2. قاعدة البيانات (SQLite)
 # ---------------------------------------------------------
 DB_FILE = "whispers.db"
 
@@ -115,7 +115,6 @@ def delete_whisper(whisper_id):
     conn.commit()
     conn.close()
 
-# الحظر وإلغاء الحظر للحسابات
 def block_user(owner_id, blocked_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -138,7 +137,6 @@ def is_blocked(owner_id, user_id):
     conn.close()
     return bool(row)
 
-# حفظ واسترجاع سجل اليوزرات
 def save_user_history(user_id, targets):
     if not targets:
         return
@@ -170,7 +168,7 @@ def get_user_history(user_id):
     return []
 
 # ---------------------------------------------------------
-# 3. معالجة الأحداث والـ Inline Mode
+# 3. معالجة الـ Inline المباشرة السريعة
 # ---------------------------------------------------------
 async def start_command(update, context):
     welcome_text = (
@@ -188,50 +186,52 @@ async def inline_whisper(update, context):
     sender_name = sender.first_name
     sender_username = sender.username.lower() if sender.username else ""
 
-    # استدعاء السجل السريع عند فتح الـ Inline دون كتابة يوزرات
-    if not query or not any(word.startswith('@') for word in query.split()):
-        history = get_user_history(sender_id)
-        if history:
-            results = []
-            for index, target_group in enumerate(history):
-                results.append(
-                    InlineQueryResultArticle(
-                        id=f"hist_{index}",
-                        title=f"👥 إرسال سريع لـ: {target_group}",
-                        description="اضغط لتجهيز المنشنات تلقائياً في خانة الكتابة",
-                        input_message_content=InputTextMessageContent(
-                            message_text=f"💡 تجهيز همسة سريعة لـ {target_group}..."
-                        ),
-                        reply_markup=InlineKeyboardMarkup([[
-                            InlineKeyboardButton("✏️ كتابة الهمسة الآن", switch_inline_query_current_chat=f"اكتب همستك هنا {target_group}")
-                        ]])
-                    )
-                )
-            await update.inline_query.answer(results, cache_time=1)
-            return
+    if not query:
+        return
 
-    # التفكيك الذكي للرسالة والمنشنات
     words = query.split()
     targets = [w.replace('@', '').lower() for w in words if w.startswith('@')]
     text_words = [w for w in words if not w.startswith('@')]
     whisper_text = " ".join(text_words).strip()
 
-    if not whisper_text:
-        return
-
-    # حفظ اليوزرات في السجل
-    if targets:
-        save_user_history(sender_id, targets)
-
-    targets_display = " ".join([f"@{t}" for t in targets]) if targets else "للجميع (أول من يفتحها)"
-    id_normal = str(uuid.uuid4())[:12]
-    id_burn = str(uuid.uuid4())[:12]
-    id_public = str(uuid.uuid4())[:12]
-
     results = []
 
-    if targets:
-        # همسة خاصة بشرط منشن
+    # حالة 1: المستخدم كتب نص ولم يكتب منشن بعد -> نعرض له يوزراته السابقة مباشرة بالمنيو
+    if not targets and whisper_text:
+        history = get_user_history(sender_id)
+        if history:
+            for index, target_group in enumerate(history):
+                hist_targets = [t.replace('@', '').strip().lower() for t in target_group.split()]
+                id_hist_norm = str(uuid.uuid4())[:12]
+                
+                save_whisper(id_hist_norm, hist_targets, sender_id, sender_name, sender_username, whisper_text, 'normal')
+                
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔒 اضغط لقراءة الهمسة", callback_data=f"show_{id_hist_norm}")],
+                    [InlineKeyboardButton("👁️ معاينة نص همستك", callback_data=f"prev_{id_hist_norm}")]
+                ])
+
+                results.append(
+                    InlineQueryResultArticle(
+                        id=f"hist_{index}_{id_hist_norm}",
+                        title=f"👤 إرسال الهمسة لـ: {target_group}",
+                        description=f"الرسالة: {whisper_text}",
+                        input_message_content=InputTextMessageContent(
+                            message_text=f"🔒 **همسة سرية موجهة إلى [{target_group}]**\nلا يمكن لأحد قراءتها غيرهم.", 
+                            parse_mode="Markdown"
+                        ),
+                        reply_markup=kb
+                    )
+                )
+
+    # حالة 2: كتب المستخدم المنشن بيده مع النص
+    if targets and whisper_text:
+        save_user_history(sender_id, targets)
+        targets_display = " ".join([f"@{t}" for t in targets])
+        
+        id_normal = str(uuid.uuid4())[:12]
+        id_burn = str(uuid.uuid4())[:12]
+
         save_whisper(id_normal, targets, sender_id, sender_name, sender_username, whisper_text, 'normal')
         save_whisper(id_burn, targets, sender_id, sender_name, sender_username, whisper_text, 'burn')
 
@@ -260,8 +260,10 @@ async def inline_whisper(update, context):
                 reply_markup=kb_burn
             )
         ])
-    else:
-        # خيار "الهمسة العامة": تتاح لأول شخص يفتحها
+
+    # حالة 3: همسة عامة (بدون تحديد منشن إطلاقاً)
+    if not targets and whisper_text:
+        id_public = str(uuid.uuid4())[:12]
         save_whisper(id_public, [], sender_id, sender_name, sender_username, whisper_text, 'public')
         kb_public = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔓 همسة عامة (تُغلق بعد أول قراءة)", callback_data=f"show_{id_public}")],
@@ -270,7 +272,7 @@ async def inline_whisper(update, context):
 
         results.append(
             InlineQueryResultArticle(
-                id=id_public,
+                id=f"pub_{id_public}",
                 title="🌐 همسة عامة (لأول شخص يضغطها)",
                 description=f"الرسالة: {whisper_text}",
                 input_message_content=InputTextMessageContent(message_text="🌐 **همسة عامة مفتوحة لأول شخص يقرأها!**", parse_mode="Markdown"),
@@ -287,7 +289,6 @@ async def handle_click(update, context):
     current_username = user.username.lower() if user.username else ""
     current_id = user.id
 
-    # معاينة النص للمرسل فقط
     if data.startswith("prev_"):
         whisper_id = data.split("prev_")[1]
         whisper = get_whisper(whisper_id)
@@ -302,7 +303,6 @@ async def handle_click(update, context):
             await query.answer("❌ الهمسة غير موجودة.", show_alert=True)
         return
 
-    # إدارة الحظر وإلغاء الحظر
     if data.startswith("block_"):
         target_id = int(data.split("block_")[1])
         block_user(current_id, target_id)
@@ -317,10 +317,9 @@ async def handle_click(update, context):
     if data.startswith("unblock_"):
         target_id = int(data.split("unblock_")[1])
         unblock_user(current_id, target_id)
-        await query.answer("✅ تم إلغاء الحظر بنجاح! يمكنه الآن فتح همساتك القادمة.", show_alert=True)
+        await query.answer("✅ تم إلغاء الحظر بنجاح!", show_alert=True)
         return
 
-    # قراءة الهمسة
     if data.startswith("show_"):
         whisper_id = data.split("show_")[1]
         whisper = get_whisper(whisper_id)
@@ -334,17 +333,15 @@ async def handle_click(update, context):
         targets = whisper['targets']
         whisper_type = whisper['type']
 
-        # التأكد من عدم وجود حظر على المستخدم
         if is_blocked(sender_id, current_id):
             await query.answer("🚫 قام صاحب الهمسة بحظرك من فتح همساته!", show_alert=True)
             return
 
         is_sender = (current_id == sender_id or (sender_username and current_username == sender_username))
         
-        # معالجة "الهمسة العامة" (First Come, First Served)
         if whisper_type == 'public':
             if whisper['opened'] and not is_sender:
-                await query.answer(f"🔒 تم قراءة هذه الهمسة العامة وسحبها بواسطة {whisper['opened_by_user']}!", show_alert=True)
+                await query.answer(f"🔒 تم قراءة هذه الهمسة العامة بواسطة {whisper['opened_by_user']}!", show_alert=True)
                 return
 
             msg = f"📩 من: {whisper['sender_name']}\n\n💬 الهمسة: {whisper['text']}"
@@ -360,7 +357,6 @@ async def handle_click(update, context):
                     pass
             return
 
-        # معالجة الهمسة المخصصة بمستهدفين
         is_target = current_username in targets
 
         if is_target or is_sender:
@@ -375,7 +371,6 @@ async def handle_click(update, context):
                 except Exception:
                     pass
 
-                # إشعار قراءة للمرسل
                 try:
                     user_tag = f"@{current_username}" if current_username else user.first_name
                     await context.bot.send_message(
@@ -394,7 +389,6 @@ async def handle_click(update, context):
                 delete_whisper(whisper_id)
 
         else:
-            # تنبيه المتسلل مع زر حظر الحساب الفوري
             await query.answer("🚫 هذه الهمسة ليست موجهة لك!", show_alert=True)
             try:
                 user_tag = f"@{current_username}" if current_username else "بدون يوزر"
